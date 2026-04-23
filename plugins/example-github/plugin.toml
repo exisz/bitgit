@@ -1,0 +1,15 @@
+name = "example-github"
+version = "0.0.1"
+entrypoint = "./example-github"
+hooks = [
+  "pre-pr-create",
+  "post-pr-create",
+  "pre-pr-merge",
+  "pre-commit",
+  "pre-push",
+]
+
+# Empty [match] block → attaches universally.
+# Real plugins should narrow this down. See docs/plugin-protocol.md.
+[match]
+remote_host = ["github.com"]

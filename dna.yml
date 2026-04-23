@@ -1,0 +1,27 @@
+id: dna://project/bitgit
+title: bitgit — git + Bitbucket DC CLI with hook-based plugins
+type: project
+managed_by: dna://agent/nebula
+goal: |
+  Empire's first Go OSS repo. Provide a generic-verb git/Bitbucket DC CLI
+  whose behaviour is shaped by language-agnostic plugins (JSON-RPC stdio).
+  Public chassis here; downstream verb implementation owned by `lexis`.
+boundary:
+  - Public, MIT, under exisz/.
+  - Chassis only — never imports from the private bitgit-workspace overlay.
+  - Plugin protocol is contractual; breaking changes require a major bump.
+  - Verbs may be stubs; the CLI surface and plugin runtime must always work.
+status: pre-alpha
+language: go
+license: MIT
+upstream_repo: exisz/bitgit
+homepage: https://exisz.github.io/bitgit/
+landing_page: docs/index.html (GitHub Pages)
+distribution:
+  - GitHub Releases (goreleaser)
+  - Homebrew tap exisz/homebrew-tap (stable tags only)
+  - go install github.com/exisz/bitgit/cmd/bitgit@latest
+companion:
+  private_overlay: exisz/bitgit-workspace (lexis-owned)
+  user_config: ~/.bitgit/
+standard: ~/.openclaw/skills/empire-standard/references/go-oss-standard.md

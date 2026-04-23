@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>bitgit — git + Bitbucket DC CLI with a plugin system</title>
+  <meta name="description" content="bitgit: a Go CLI that wraps git + Bitbucket Data Center, with language-agnostic plugins via JSON-RPC over stdio.">
+  <meta property="og:title" content="bitgit — git + Bitbucket DC CLI with plugins">
+  <meta property="og:description" content="Generic-verb git CLI with veto/mutate plugins via JSON-RPC stdio. Pre-alpha.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://exisz.github.io/bitgit/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪝</text></svg>">
+  <style>
+    *,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+    :root {
+      --bg:#0a0a0a; --fg:#fafafa; --fg-dim:#a1a1aa; --fg-muted:#71717a;
+      --accent:#3b82f6; --accent-hover:#2563eb;
+      --surface:#111114; --surface-border:#27272a;
+      --code-bg:#050505;
+      --green:#10b981; --amber:#f59e0b; --red:#ef4444;
+    }
+    html { scroll-behavior:smooth; }
+    body {
+      background:var(--bg); color:var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", system-ui, sans-serif;
+      line-height:1.6; min-height:100vh;
+    }
+    code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace; }
+    a { color:var(--accent); text-decoration:none; }
+    a:hover { color:var(--accent-hover); text-decoration:underline; }
+    .container { max-width:920px; margin:0 auto; padding:0 1.5rem; }
+    header { padding:6rem 0 3rem; text-align:center; border-bottom:1px solid var(--surface-border); }
+    .badge {
+      display:inline-block; padding:0.25rem 0.75rem;
+      background:var(--surface); border:1px solid var(--surface-border);
+      border-radius:999px; font-size:0.75rem; color:var(--amber);
+      margin-bottom:1.5rem; letter-spacing:0.05em;
+    }
+    h1 {
+      font-size:clamp(2.5rem, 7vw, 4.5rem); font-weight:800; letter-spacing:-0.04em;
+      line-height:1.05; margin-bottom:1rem;
+    }
+    .tagline { font-size:clamp(1.1rem, 2.5vw, 1.4rem); color:var(--fg-dim); max-width:640px; margin:0 auto 2rem; }
+    .cta { display:flex; gap:0.75rem; justify-content:center; flex-wrap:wrap; margin-top:2rem; }
+    .btn {
+      display:inline-flex; align-items:center; gap:0.5rem;
+      padding:0.75rem 1.25rem; border-radius:8px; font-weight:600; font-size:0.95rem;
+      transition:all 0.15s ease; text-decoration:none;
+    }
+    .btn:hover { text-decoration:none; transform:translateY(-1px); }
+    .btn-primary { background:var(--accent); color:#fff; }
+    .btn-primary:hover { background:var(--accent-hover); color:#fff; }
+    .btn-secondary { background:var(--surface); color:var(--fg); border:1px solid var(--surface-border); }
+    .btn-secondary:hover { background:#18181b; color:var(--fg); }
+    section { padding:4rem 0; border-bottom:1px solid var(--surface-border); }
+    section:last-of-type { border-bottom:none; }
+    h2 { font-size:1.875rem; font-weight:700; letter-spacing:-0.02em; margin-bottom:1.5rem; }
+    h3 { font-size:1.125rem; font-weight:600; margin: 1.5rem 0 0.75rem; color:var(--fg); }
+    p { color:var(--fg-dim); margin-bottom:1rem; }
+    pre {
+      background:var(--code-bg); border:1px solid var(--surface-border);
+      border-radius:8px; padding:1rem 1.25rem; overflow-x:auto;
+      font-size:0.875rem; line-height:1.6; margin: 0.75rem 0;
+    }
+    pre code { background:transparent; color:#e4e4e7; padding:0; }
+    code:not(pre code) {
+      background:var(--surface); border:1px solid var(--surface-border);
+      padding:0.1rem 0.4rem; border-radius:4px; font-size:0.85em; color:#fbbf24;
+    }
+    .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); margin-top:1.5rem; }
+    .card { background:var(--surface); border:1px solid var(--surface-border); border-radius:10px; padding:1.25rem; }
+    .card h3 { margin-top:0; color:var(--accent); }
+    .card p { margin-bottom:0; font-size:0.92rem; }
+    table { width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem; }
+    th, td { text-align:left; padding:0.6rem 0.75rem; border-bottom:1px solid var(--surface-border); }
+    th { color:var(--fg-muted); font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em; }
+    td code { white-space:nowrap; }
+    .status { display:inline-flex; align-items:center; gap:0.5rem; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--amber); }
+    footer { padding:3rem 0; text-align:center; color:var(--fg-muted); font-size:0.85rem; }
+    footer a { color:var(--fg-dim); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="badge">🪝 PRE-ALPHA · v0.0.1-alpha</div>
+    <h1>bitgit</h1>
+    <p class="tagline">
+      A git + Bitbucket DC CLI with a hook-based plugin system. Generic verbs, language-agnostic plugins via JSON-RPC over stdio.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/exisz/bitgit">⭐ Star on GitHub</a>
+      <a class="btn btn-secondary" href="https://github.com/exisz/bitgit/blob/main/docs/plugin-protocol.md">Plugin protocol</a>
+      <a class="btn btn-secondary" href="https://github.com/exisz/bitgit/releases">Releases</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="container">
+    <h2>What is bitgit?</h2>
+    <p>
+      <code>bitgit</code> is a Go CLI that wraps <code>git</code> and Bitbucket Data Center
+      operations behind generic verbs — <code>bitgit pr create</code>, <code>bitgit commit</code>,
+      <code>bitgit push</code>, <code>bitgit doctor</code> — and routes every action
+      through a <strong>plugin pipeline</strong>.
+    </p>
+    <p>
+      Plugins auto-attach based on git remote, project key, repo slug, or branch prefix.
+      They can <strong>veto</strong> an operation (corp policy: "no force-push to release/*")
+      or <strong>mutate</strong> it (auto-prepend Jira keys, inject reviewers, rewrite
+      commit messages). Plugins speak JSON-RPC over stdio — write them in any language.
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Generic verbs</h3>
+        <p>Same command surface across every backend. <code>bitgit pr create</code> works the same way whether you're on Bitbucket DC, GitHub, or somewhere else.</p>
+      </div>
+      <div class="card">
+        <h3>Hook-based plugins</h3>
+        <p><code>pre-pr-create</code>, <code>pre-commit</code>, <code>pre-push</code>, <code>pre-pr-merge</code>, <code>post-pr-create</code>… plugins fire automatically.</p>
+      </div>
+      <div class="card">
+        <h3>Language-agnostic</h3>
+        <p>JSON-RPC 2.0 over stdin/stdout. Write plugins in Go, Python, Node, Rust, bash — anything that can read and write a line.</p>
+      </div>
+      <div class="card">
+        <h3>Auto-attach</h3>
+        <p>Match on remote host, project key, repo slug, branch prefix, or regex. The right plugins fire for the right repos automatically.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Status</h2>
+    <p>
+      <span class="status"><span class="dot"></span> <strong>Pre-alpha — under active development.</strong></span>
+    </p>
+    <p>
+      The CLI surface and plugin runtime are in place. Verbs are stubs while the
+      Bitbucket DC integration is being built. Watch <a href="https://github.com/exisz/bitgit">exisz/bitgit</a>
+      for v0.1.0.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Install</h2>
+    <h3>Homebrew (after first stable release)</h3>
+<pre><code>brew install exisz/tap/bitgit</code></pre>
+
+    <h3>From source (always works)</h3>
+<pre><code>go install github.com/exisz/bitgit/cmd/bitgit@latest</code></pre>
+
+    <h3>Pre-built binary</h3>
+    <p>Grab the right archive from <a href="https://github.com/exisz/bitgit/releases">GitHub Releases</a> — darwin/linux/windows × arm64/amd64.</p>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Quick start</h2>
+<pre><code>$ bitgit --help
+$ bitgit doctor                  # sanity-check chassis + plugins
+$ bitgit plugin list             # plugins under ~/.bitgit/plugins/
+$ bitgit pr create               # (stub — under development)</code></pre>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>A plugin is just an executable</h2>
+    <p>~50 lines in any language. Drop a <code>plugin.toml</code> + executable under <code>~/.bitgit/plugins/&lt;name&gt;/</code>:</p>
+<pre><code>name = "corp-policy"
+version = "1.0.0"
+entrypoint = "./corp-policy"
+hooks = ["pre-pr-create", "pre-pr-merge"]
+
+[match]
+remote_host = ["bitbucket.example.com"]
+project_key = ["PLAT"]</code></pre>
+
+    <p>Then the plugin reads JSON-RPC requests from stdin and writes responses to stdout. See <a href="https://github.com/exisz/bitgit/blob/main/docs/plugin-protocol.md">the protocol spec</a> for the wire format.</p>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Hooks</h2>
+    <table>
+      <thead>
+        <tr><th>Hook</th><th>Verb</th><th>Veto</th><th>Mutate</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>pre-commit</code></td><td><code>bitgit commit</code></td><td>✓</td><td>✓</td></tr>
+        <tr><td><code>pre-push</code></td><td><code>bitgit push</code></td><td>✓</td><td>✓</td></tr>
+        <tr><td><code>pre-pr-create</code></td><td><code>bitgit pr create</code></td><td>✓</td><td>✓</td></tr>
+        <tr><td><code>post-pr-create</code></td><td><code>bitgit pr create</code></td><td>—</td><td>—</td></tr>
+        <tr><td><code>pre-pr-merge</code></td><td><code>bitgit pr merge</code></td><td>✓</td><td>✓</td></tr>
+        <tr><td><code>post-pr-merge</code></td><td><code>bitgit pr merge</code></td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>
+      <a href="https://github.com/exisz/bitgit">github.com/exisz/bitgit</a> ·
+      MIT License ·
+      Part of the Exis open source line.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

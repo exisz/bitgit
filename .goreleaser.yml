@@ -1,0 +1,99 @@
+version: 2
+
+project_name: bitgit
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: bitgit
+    main: ./cmd/bitgit
+    binary: bitgit
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{ .Version }}
+      - -X main.Commit={{ .ShortCommit }}
+      - -X main.Date={{ .Date }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - docs/**/*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: 'Bug fixes'
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: 'Other'
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - '^ci:'
+
+release:
+  github:
+    owner: exisz
+    name: bitgit
+  prerelease: auto      # vX.Y.Z-alpha / -rc / -beta → marked as pre-release
+  draft: false
+  name_template: "{{ .ProjectName }} {{ .Tag }}"
+
+brews:
+  - name: bitgit
+    repository:
+      owner: exisz
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://exisz.github.io/bitgit/"
+    description: "git + Bitbucket DC CLI with a hook-based plugin system."
+    license: "MIT"
+    skip_upload: auto    # don't push formula for pre-releases
+    install: |
+      bin.install "bitgit"
+    test: |
+      system "#{bin}/bitgit", "--version"
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com

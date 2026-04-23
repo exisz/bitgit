@@ -1,0 +1,21 @@
+# Binaries
+/dist/
+/bitgit
+/cmd/bitgit/bitgit
+/plugins/example-github/example-github
+
+# Test/coverage output
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local dev
+.env
+.env.local
