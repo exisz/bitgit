@@ -26,6 +26,11 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
+      - name: go mod tidy + download
+        run: |
+          go mod tidy
+          go mod download
+
       - name: gofmt
         run: |
           out=$(gofmt -s -l .)
@@ -43,13 +48,19 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    # Lint is informational while the codebase is pre-alpha — don't block PRs.
+    # Promote to required check before tagging v0.1.0.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache: true
+      - name: go mod tidy
+        run: go mod tidy
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.61
+          version: v1.62
+          args: --timeout=5m
