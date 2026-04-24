@@ -201,3 +201,112 @@ func TestBranchNew_HookVeto(t *testing.T) {
 
 // Ensure unused import doesn't cause issues.
 var _ = context.Background
+
+// ---------------------------------------------------------------------------
+// pr comments / pr reply / pr comment --top-level
+// ---------------------------------------------------------------------------
+
+func TestPRCommentRequiresTopLevel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BITGIT_HOME", dir)
+	config.Reset()
+
+	root := buildRoot()
+	var out bytes.Buffer
+	root.Cmd.SetOut(&out)
+	root.Cmd.SetErr(&out)
+	root.Cmd.SetArgs([]string{"pr", "comment", "8516", "done"})
+	err := root.Cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --top-level is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "--top-level") {
+		t.Errorf("expected --top-level in error, got: %v", err)
+	}
+}
+
+func TestPRCommentHelp_HasTopLevelFlag(t *testing.T) {
+	root := buildRoot()
+	var out bytes.Buffer
+	root.Cmd.SetOut(&out)
+	root.Cmd.SetErr(&out)
+	root.Cmd.SetArgs([]string{"pr", "comment", "--help"})
+	_ = root.Cmd.Execute()
+	help := out.String()
+	if !strings.Contains(help, "--top-level") {
+		t.Errorf("expected --top-level in help, got: %s", help)
+	}
+}
+
+func TestPRCommentsHelp(t *testing.T) {
+	root := buildRoot()
+	var out bytes.Buffer
+	root.Cmd.SetOut(&out)
+	root.Cmd.SetErr(&out)
+	root.Cmd.SetArgs([]string{"pr", "comments", "--help"})
+	_ = root.Cmd.Execute()
+	help := out.String()
+	if !strings.Contains(help, "<id>") {
+		t.Errorf("expected '<id>' in help, got: %s", help)
+	}
+}
+
+func TestPRReplyHelp(t *testing.T) {
+	root := buildRoot()
+	var out bytes.Buffer
+	root.Cmd.SetOut(&out)
+	root.Cmd.SetErr(&out)
+	root.Cmd.SetArgs([]string{"pr", "reply", "--help"})
+	_ = root.Cmd.Execute()
+	help := out.String()
+	if !strings.Contains(help, "comment-id") {
+		t.Errorf("expected 'comment-id' in help, got: %s", help)
+	}
+}
+
+func TestPRComment_HookVeto(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BITGIT_HOME", dir)
+	config.Reset()
+
+	tc := cli.NewTestContext(t, dir)
+	tc.InstallVetoPlugin("pre-pr-comment", "comment policy violation")
+
+	root := buildRoot()
+	var out bytes.Buffer
+	root.Cmd.SetOut(&out)
+	root.Cmd.SetErr(&out)
+	root.Cmd.SetArgs([]string{"pr", "comment", "8516", "I've successfully completed this task", "--top-level"})
+	err := root.Cmd.Execute()
+	if err == nil {
+		t.Fatal("expected veto error, got nil")
+	}
+	if !strings.Contains(err.Error(), "vetoed") && !strings.Contains(err.Error(), "comment policy violation") {
+		t.Errorf("expected veto message, got: %v", err)
+	}
+}
+
+func TestPRReply_HookVeto(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BITGIT_HOME", dir)
+	config.Reset()
+
+	tc := cli.NewTestContext(t, dir)
+	tc.InstallVetoPlugin("pre-pr-comment", "comment policy violation")
+
+	root := buildRoot()
+	var out bytes.Buffer
+	root.Cmd.SetOut(&out)
+	root.Cmd.SetErr(&out)
+	root.Cmd.SetArgs([]string{"pr", "reply", "8516", "12345", "Done — fixed all the things"})
+	err := root.Cmd.Execute()
+	if err == nil {
+		t.Fatal("expected veto error, got nil")
+	}
+	if !strings.Contains(err.Error(), "vetoed") && !strings.Contains(err.Error(), "comment policy violation") {
+		t.Errorf("expected veto message, got: %v", err)
+	}
+}
+
+// Ensure unused import doesn't cause issues.
+var _ = cli.BuildInfo{}

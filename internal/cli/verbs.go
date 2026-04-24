@@ -137,6 +137,8 @@ func newPRCmd() *cobra.Command {
 		newPRShowCmd(),
 		newPRListCmd(),
 		newPRCommentCmd(),
+		newPRCommentsCmd(),
+		newPRReplyCmd(),
 		newPRReadyCmd(),
 		newPRMergeCmd(),
 		newPRBlockersCmd(),
@@ -363,16 +365,19 @@ func newPRListCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
-// pr comment
+// pr comment (top-level only; use pr reply for threaded replies)
 // ---------------------------------------------------------------------------
 
 func newPRCommentCmd() *cobra.Command {
-	var replyTo string
+	var topLevel bool
 	cmd := &cobra.Command{
 		Use:   "comment <id> <text>",
-		Short: "Post a comment on a PR",
+		Short: "Post a top-level comment on a PR (requires --top-level)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
+			if !topLevel {
+				return fmt.Errorf("pr comment requires --top-level flag (use \"pr reply <comment-id> <text>\" for in-thread replies)")
+			}
 			cfg, err := config.Load()
 			if err != nil {
 				return err
@@ -388,7 +393,111 @@ func newPRCommentCmd() *cobra.Command {
 			prID := args[0]
 			text := args[1]
 
-			replyInt, _ := strconv.Atoi(replyTo)
+			payload := map[string]any{
+				"pr_id":    prID,
+				"text":     text,
+				"reply_to": 0,
+			}
+			hookCtx := hookContext("pre-pr-comment", cfg)
+			if err := dispatch(ctx, manifests, hookCtx, payload); err != nil {
+				if plugin.IsVeto(err) {
+					return fmt.Errorf("vetoed: %w", err)
+				}
+				return err
+			}
+			text = strFromPayload(payload, "text", text)
+
+			h, err := detectHost(cfg)
+			if err != nil {
+				return err
+			}
+			if err := h.CommentPR(ctx, prID, text, ""); err != nil {
+				return fmt.Errorf("comment PR: %w", err)
+			}
+			fmt.Fprintln(c.OutOrStdout(), "comment posted")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&topLevel, "top-level", false, "Explicitly post as a top-level comment")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// pr comments (list)
+// ---------------------------------------------------------------------------
+
+func newPRCommentsCmd() *cobra.Command {
+	var asJSON bool
+	return &cobra.Command{
+		Use:   "comments <id>",
+		Short: "List all comments on a PR",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			h, err := detectHost(cfg)
+			if err != nil {
+				return err
+			}
+			comments, err := h.ListComments(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("list comments: %w", err)
+			}
+			if len(comments) == 0 {
+				fmt.Fprintln(c.OutOrStdout(), "no comments")
+				return nil
+			}
+			if asJSON {
+				return json.NewEncoder(c.OutOrStdout()).Encode(comments)
+			}
+			tw := tabwriter.NewWriter(c.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(tw, "ID\tAUTHOR\tTIMESTAMP\tBODY")
+			for _, cm := range comments {
+				body := cm.Body
+				if len(body) > 60 {
+					body = body[:57] + "..."
+				}
+				// strip newlines for table display
+				body = strings.ReplaceAll(body, "\n", " ")
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", cm.ID, cm.Author, cm.Timestamp, body)
+			}
+			return tw.Flush()
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// pr reply (in-thread)
+// ---------------------------------------------------------------------------
+
+func newPRReplyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reply <pr-id> <comment-id> <text>",
+		Short: "Reply in-thread to a PR comment",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(c *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			manifests, err := loadPlugins(cfg)
+			if err != nil {
+				return err
+			}
+
+			prID := args[0]
+			commentID := args[1]
+			text := args[2]
+
+			replyInt, _ := strconv.Atoi(commentID)
 			payload := map[string]any{
 				"pr_id":    prID,
 				"text":     text,
@@ -407,15 +516,14 @@ func newPRCommentCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := h.CommentPR(ctx, prID, text, replyTo); err != nil {
-				return fmt.Errorf("comment PR: %w", err)
+			// replyTo forces threading; adapter handles parent comment linkage
+			if err := h.CommentPR(ctx, prID, text, commentID); err != nil {
+				return fmt.Errorf("reply: %w", err)
 			}
-			fmt.Fprintln(c.OutOrStdout(), "comment posted")
+			fmt.Fprintln(c.OutOrStdout(), "reply posted")
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&replyTo, "reply-to", "", "Comment ID to reply to")
-	return cmd
 }
 
 // ---------------------------------------------------------------------------
