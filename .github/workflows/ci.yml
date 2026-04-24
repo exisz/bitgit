@@ -60,7 +60,7 @@ jobs:
       - name: go mod tidy
         run: go mod tidy
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.62
+          version: v2.5.0
           args: --timeout=5m
