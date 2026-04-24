@@ -107,6 +107,17 @@ JSON-RPC responses on stdout. ~50 lines in any language.
 | Private overlay | `exisz/bitgit-workspace` | Shop-specific verb implementations + plugins (private) |
 | User config | `~/.bitgit/` | `config.toml`, `plugins/`, `secrets/`, `cache/` |
 
+### Token file naming
+
+Default token paths under `~/.bitgit/secrets/` use the **host type with underscores**, not hyphens:
+
+| Host type        | Token file                          | Env override        |
+|------------------|-------------------------------------|---------------------|
+| `github`         | `~/.bitgit/secrets/github.token`    | `GITHUB_TOKEN`      |
+| `bitbucket-dc`   | `~/.bitgit/secrets/bitbucket_dc.token` | `BITBUCKET_TOKEN`   |
+
+All secret files must be `chmod 600` or bitgit refuses to read them.
+
 The chassis works standalone. The private overlay is optional and never
 imported by the chassis.
 
