@@ -31,7 +31,7 @@ func newPluginListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List installed plugins discovered under ~/.bitgit/plugins",
-		RunE: func(c *cobra.Command, args []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			dir, err := pluginsDir()
 			if err != nil {
 				return err
