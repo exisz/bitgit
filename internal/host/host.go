@@ -59,6 +59,8 @@ type Host interface {
 	MergePR(ctx context.Context, id string) (string, error)
 	// CommentPR posts a comment on a PR. replyTo is a comment ID (empty = top-level).
 	CommentPR(ctx context.Context, id, text, replyTo string) error
+	// ListComments returns all comments on a PR in chronological order.
+	ListComments(ctx context.Context, id string) ([]*Comment, error)
 	// GetBuildStatus returns the CI state for a commit SHA.
 	GetBuildStatus(ctx context.Context, sha string) (string, error)
 	// GetReviewers returns the list of reviewer usernames for a PR.

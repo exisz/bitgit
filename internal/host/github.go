@@ -169,6 +169,33 @@ func (g *gitHubHost) CommentPR(ctx context.Context, id, text, _ string) error {
 	return nil
 }
 
+func (g *gitHubHost) ListComments(ctx context.Context, id string) ([]*Comment, error) {
+	num, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid PR id %q: %w", id, err)
+	}
+	comments, _, err := g.client.Issues.ListComments(ctx, g.owner, g.repo, num, &gogithub.IssueListCommentsOptions{
+		ListOptions: gogithub.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("github ListComments: %w", err)
+	}
+	out := make([]*Comment, len(comments))
+	for i, c := range comments {
+		body := c.GetBody()
+		if len(body) > 80 {
+			body = body[:77] + "..."
+		}
+		out[i] = &Comment{
+			ID:        strconv.FormatInt(c.GetID(), 10),
+			Author:    c.GetUser().GetLogin(),
+			Body:      body,
+			Timestamp: c.GetCreatedAt().Format(time.RFC3339),
+		}
+	}
+	return out, nil
+}
+
 func (g *gitHubHost) GetBuildStatus(ctx context.Context, sha string) (string, error) {
 	status, _, err := g.client.Repositories.GetCombinedStatus(ctx, g.owner, g.repo, sha, nil)
 	if err != nil {

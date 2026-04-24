@@ -235,3 +235,79 @@ func TestReadTokenFromEnv_Bitbucket(t *testing.T) {
 	}
 	os.Unsetenv("BITBUCKET_TOKEN")
 }
+
+func TestBitbucketDC_ListComments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/activities") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"isLastPage": true,
+				"values": []any{
+					map[string]any{
+						"action": "COMMENTED",
+						"comment": map[string]any{
+							"id": 201, "text": "looks good", "severity": "NORMAL", "state": "OPEN",
+							"author":      map[string]any{"slug": "alice", "displayName": "Alice"},
+							"createdDate": 1700000001000,
+						},
+					},
+					map[string]any{
+						"action": "COMMENTED",
+						"comment": map[string]any{
+							"id": 202, "text": "fix this", "severity": "BLOCKER", "state": "OPEN",
+							"author":      map[string]any{"slug": "bob", "displayName": "Bob"},
+							"createdDate": 1700000002000,
+						},
+					},
+					map[string]any{
+						"action": "REVIEWED",
+						// no comment field — should be skipped
+					},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	h := hostFromTestServer(t, srv.URL)
+	comments, err := h.ListComments(context.Background(), "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].ID != "201" {
+		t.Errorf("expected first comment id=201, got %s", comments[0].ID)
+	}
+	if comments[0].Author != "Alice" {
+		t.Errorf("expected author=Alice, got %s", comments[0].Author)
+	}
+	if comments[1].ID != "202" {
+		t.Errorf("expected second comment id=202, got %s", comments[1].ID)
+	}
+}
+
+func TestBitbucketDC_ListComments_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/activities") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"isLastPage": true,
+				"values":     []any{},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	h := hostFromTestServer(t, srv.URL)
+	comments, err := h.ListComments(context.Background(), "5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 0 {
+		t.Errorf("expected 0 comments, got %d", len(comments))
+	}
+}

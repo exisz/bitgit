@@ -397,6 +397,39 @@ func (b *bitbucketDCHost) CommentPR(ctx context.Context, id, text, replyTo strin
 	return b.decode(resp, nil)
 }
 
+func (b *bitbucketDCHost) ListComments(ctx context.Context, prID string) ([]*Comment, error) {
+	start := 0
+	var out []*Comment
+	for {
+		path := fmt.Sprintf("/rest/api/1.0/projects/%s/repos/%s/pull-requests/%s/activities?start=%d&limit=100",
+			b.projectKey, b.repoSlug, prID, start)
+		resp, err := b.do(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("bitbucket-dc ListComments: %w", err)
+		}
+		var page bbPageResponse[bbActivity]
+		if err := b.decode(resp, &page); err != nil {
+			return nil, err
+		}
+		for _, act := range page.Values {
+			if act.Action == "COMMENTED" && act.Comment != nil {
+				c := act.Comment
+				out = append(out, &Comment{
+					ID:        strconv.Itoa(c.ID),
+					Author:    c.Author.DisplayName,
+					Body:      c.Text,
+					Timestamp: msToRFC3339(c.CreatedDate),
+				})
+			}
+		}
+		if page.IsLastPage {
+			break
+		}
+		start = page.NextPageStart
+	}
+	return out, nil
+}
+
 func (b *bitbucketDCHost) GetBuildStatus(ctx context.Context, sha string) (string, error) {
 	// Build status API is at /rest/build-status/1.0/commits/{sha} — separate from /rest/api/1.0
 	resp, err := b.do(ctx, http.MethodGet,
