@@ -29,11 +29,22 @@ type PluginsConfig struct {
 	Disabled []string `toml:"disabled"`
 }
 
+// ReviewersConfig holds the [reviewers] section.
+type ReviewersConfig struct {
+	// Team is a fixed list of reviewer usernames always added to every PR.
+	Team []string `toml:"team"`
+	// IncludeRecent, when true, also pulls reviewers from recent merged PRs.
+	IncludeRecent bool `toml:"include_recent"`
+	// RecentLimit is the number of recent merged PRs to scan (default 1).
+	RecentLimit int `toml:"recent_limit"`
+}
+
 // Config is the parsed ~/.bitgit/config.toml.
 type Config struct {
-	DefaultRemote string        `toml:"default_remote"`
-	Hosts         []HostEntry   `toml:"hosts"`
-	Plugins       PluginsConfig `toml:"plugins"`
+	DefaultRemote string          `toml:"default_remote"`
+	Hosts         []HostEntry     `toml:"hosts"`
+	Plugins       PluginsConfig   `toml:"plugins"`
+	Reviewers     ReviewersConfig `toml:"reviewers"`
 
 	// InsecureSkipVerify enables skipping TLS cert validation for all hosts.
 	// WARNING: exposes you to MITM attacks. Use only in controlled environments.
@@ -130,6 +141,9 @@ func resolveDir() (string, error) {
 func defaults(dir string) *Config {
 	return &Config{
 		DefaultRemote: "origin",
-		dir:           dir,
+		Reviewers: ReviewersConfig{
+			RecentLimit: 1,
+		},
+		dir: dir,
 	}
 }

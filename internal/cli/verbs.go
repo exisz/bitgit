@@ -19,6 +19,7 @@ import (
 	"github.com/exisz/bitgit/internal/gitutil"
 	"github.com/exisz/bitgit/internal/host"
 	"github.com/exisz/bitgit/internal/plugin"
+	"github.com/exisz/bitgit/internal/reviewer"
 )
 
 // ---------------------------------------------------------------------------
@@ -220,6 +221,12 @@ func newPRCreateCmd() *cobra.Command {
 			h, err := detectHost(cfg)
 			if err != nil {
 				return err
+			}
+
+			// Resolve reviewers: merge team + recent + explicit.
+			reviewers, err = reviewer.ResolveReviewers(ctx, cfg, h, reviewers)
+			if err != nil {
+				return fmt.Errorf("resolve reviewers: %w", err)
 			}
 
 			pr, err := h.CreatePR(ctx, host.CreatePRInput{
@@ -579,6 +586,25 @@ func newPRReadyCmd() *cobra.Command {
 			newTitle := strFromPayload(payload, "title", pr.Title)
 			newDesc := strFromPayload(payload, "description", pr.Description)
 			addReviewers := stringsFromPayload(payload, "add_reviewers")
+
+			// Resolve reviewers: merge team + recent + plugin-supplied add_reviewers.
+			addReviewers, err = reviewer.ResolveReviewers(ctx, cfg, h, addReviewers)
+			if err != nil {
+				return fmt.Errorf("resolve reviewers: %w", err)
+			}
+
+			// Remove reviewers already on the PR to avoid duplicates.
+			existing := make(map[string]struct{}, len(pr.Reviewers))
+			for _, u := range pr.Reviewers {
+				existing[u] = struct{}{}
+			}
+			var newReviewers []string
+			for _, u := range addReviewers {
+				if _, ok := existing[u]; !ok {
+					newReviewers = append(newReviewers, u)
+				}
+			}
+			addReviewers = newReviewers
 
 			if err := h.UpdatePR(ctx, prID, newTitle, newDesc, addReviewers); err != nil {
 				return fmt.Errorf("update PR: %w", err)
