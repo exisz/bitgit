@@ -142,6 +142,7 @@ func newPRCmd() *cobra.Command {
 		newPRReplyCmd(),
 		newPRReadyCmd(),
 		newPRMergeCmd(),
+		newPRDeclineCmd(),
 		newPRBlockersCmd(),
 	)
 	return cmd
@@ -224,9 +225,22 @@ func newPRCreateCmd() *cobra.Command {
 			}
 
 			// Resolve reviewers: merge team + recent + explicit.
-			reviewers, err = reviewer.ResolveReviewers(ctx, cfg, h, reviewers)
-			if err != nil {
-				return fmt.Errorf("resolve reviewers: %w", err)
+			// If a plugin hook explicitly set reviewers to [] (empty), respect it
+			// and skip auto-resolution.
+			pluginClearedReviewers := false
+			if rv, ok := payload["reviewers"]; ok {
+				if arr, isArr := rv.([]string); isArr && len(arr) == 0 {
+					pluginClearedReviewers = true
+				}
+				if arr, isArr := rv.([]any); isArr && len(arr) == 0 {
+					pluginClearedReviewers = true
+				}
+			}
+			if !pluginClearedReviewers {
+				reviewers, err = reviewer.ResolveReviewers(ctx, cfg, h, reviewers)
+				if err != nil {
+					return fmt.Errorf("resolve reviewers: %w", err)
+				}
 			}
 
 			pr, err := h.CreatePR(ctx, host.CreatePRInput{
@@ -679,6 +693,40 @@ func newPRMergeCmd() *cobra.Command {
 				"target_branch": pr.TargetBranch,
 				"merge_commit":  mergeCommit,
 			})
+			return nil
+		},
+	}
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// pr decline
+// ---------------------------------------------------------------------------
+
+func newPRDeclineCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "decline <id>",
+		Short: "Decline (close without merging) a pull request",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			h, err := detectHost(cfg)
+			if err != nil {
+				return err
+			}
+
+			prID := args[0]
+			if err := h.DeclinePR(ctx, prID); err != nil {
+				return fmt.Errorf("decline PR: %w", err)
+			}
+
+			fmt.Fprintf(c.OutOrStdout(), "PR #%s declined\n", prID)
 			return nil
 		},
 	}

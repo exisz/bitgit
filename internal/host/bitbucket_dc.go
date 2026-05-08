@@ -378,6 +378,29 @@ func (b *bitbucketDCHost) MergePR(ctx context.Context, id string) (string, error
 	return sha, nil
 }
 
+func (b *bitbucketDCHost) DeclinePR(ctx context.Context, id string) error {
+	// Bitbucket DC decline requires the PR version
+	prResp, err := b.do(ctx, http.MethodGet,
+		fmt.Sprintf("/rest/api/1.0/projects/%s/repos/%s/pull-requests/%s", b.projectKey, b.repoSlug, id),
+		nil)
+	if err != nil {
+		return fmt.Errorf("bitbucket-dc DeclinePR get version: %w", err)
+	}
+	var prData struct {
+		Version int `json:"version"`
+	}
+	if err := b.decode(prResp, &prData); err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/rest/api/1.0/projects/%s/repos/%s/pull-requests/%s/decline?version=%d",
+		b.projectKey, b.repoSlug, id, prData.Version)
+	_, err = b.do(ctx, http.MethodPost, path, nil)
+	if err != nil {
+		return fmt.Errorf("bitbucket-dc DeclinePR: %w", err)
+	}
+	return nil
+}
+
 func (b *bitbucketDCHost) CommentPR(ctx context.Context, id, text, replyTo string) error {
 	payload := map[string]any{"text": text}
 	if replyTo != "" {

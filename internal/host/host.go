@@ -65,6 +65,8 @@ type Host interface {
 	GetBuildStatus(ctx context.Context, sha string) (string, error)
 	// GetReviewers returns the list of reviewer usernames for a PR.
 	GetReviewers(ctx context.Context, id string) ([]string, error)
+	// DeclinePR declines (closes without merging) a pull request by ID.
+	DeclinePR(ctx context.Context, id string) error
 	// UpdatePR updates title, description, and adds reviewers to an existing PR.
 	UpdatePR(ctx context.Context, id, title, description string, addReviewers []string) error
 	// CurrentUser returns the authenticated username.

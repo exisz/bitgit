@@ -256,6 +256,21 @@ func (g *gitHubHost) UpdatePR(ctx context.Context, id, title, description string
 	return nil
 }
 
+func (g *gitHubHost) DeclinePR(ctx context.Context, id string) error {
+	num, err := strconv.Atoi(id)
+	if err != nil {
+		return fmt.Errorf("invalid PR id %q: %w", id, err)
+	}
+	state := "closed"
+	_, _, err = g.client.PullRequests.Edit(ctx, g.owner, g.repo, num, &gogithub.PullRequest{
+		State: &state,
+	})
+	if err != nil {
+		return fmt.Errorf("github DeclinePR: %w", err)
+	}
+	return nil
+}
+
 func (g *gitHubHost) CurrentUser(ctx context.Context) (string, error) {
 	u, _, err := g.client.Users.Get(ctx, "")
 	if err != nil {
