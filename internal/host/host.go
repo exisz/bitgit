@@ -73,6 +73,24 @@ type Host interface {
 	CurrentUser(ctx context.Context) (string, error)
 }
 
+// Attachment is a file uploaded to a host and referenceable from a comment.
+type Attachment struct {
+	// Name is the basename shown in markdown alt text.
+	Name string
+	// URL is a raw URL that renders inline when embedded as ![](URL) in a PR comment
+	// for an authenticated browser session.
+	URL string
+}
+
+// AttachmentUploader is an optional host capability for uploading binary files
+// (e.g. screenshots) referenced from PR comments.
+//
+// Hosts without a real attachments API (Bitbucket DC) MAY implement this by
+// stashing files on a dedicated git ref and returning a raw URL.
+type AttachmentUploader interface {
+	UploadAttachments(ctx context.Context, prID string, paths []string) ([]Attachment, error)
+}
+
 // Detect sniffs the remote URL and returns the appropriate Host adapter.
 func Detect(remoteURL string, cfg *config.Config) (Host, error) {
 	switch {

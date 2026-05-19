@@ -144,6 +144,7 @@ func newPRCmd() *cobra.Command {
 		newPRMergeCmd(),
 		newPRDeclineCmd(),
 		newPRBlockersCmd(),
+		newPRAttachCmd(),
 	)
 	return cmd
 }
@@ -440,6 +441,80 @@ func newPRCommentCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&topLevel, "top-level", false, "Explicitly post as a top-level comment")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// pr attach (upload files and reference them in a PR comment)
+// ---------------------------------------------------------------------------
+
+func newPRAttachCmd() *cobra.Command {
+	var message string
+	var urlsOnly bool
+	cmd := &cobra.Command{
+		Use:   "attach <pr-id> <file> [file...]",
+		Short: "Upload file(s) and post a PR comment referencing them inline",
+		Long: `Upload one or more local files and post a top-level PR comment that
+embeds them with markdown image syntax.
+
+For Bitbucket Data Center, files are pushed to a dedicated git branch
+(attachments/pr-<id>) under .attachments/ and referenced via raw URLs.
+Users viewing the PR in a browser (logged in to Bitbucket) see them inline.`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(c *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			h, err := detectHost(cfg)
+			if err != nil {
+				return err
+			}
+			up, ok := h.(host.AttachmentUploader)
+			if !ok {
+				return fmt.Errorf("this host does not support attachments")
+			}
+
+			prID := args[0]
+			files := args[1:]
+
+			atts, err := up.UploadAttachments(ctx, prID, files)
+			if err != nil {
+				return fmt.Errorf("upload attachments: %w", err)
+			}
+
+			if urlsOnly {
+				for _, a := range atts {
+					fmt.Fprintln(c.OutOrStdout(), a.URL)
+				}
+				return nil
+			}
+
+			var sb strings.Builder
+			if strings.TrimSpace(message) != "" {
+				sb.WriteString(message)
+				sb.WriteString("\n\n")
+			}
+			for _, a := range atts {
+				sb.WriteString(fmt.Sprintf("![%s](%s)\n\n", a.Name, a.URL))
+			}
+			text := strings.TrimRight(sb.String(), "\n")
+
+			if err := h.CommentPR(ctx, prID, text, ""); err != nil {
+				return fmt.Errorf("comment PR: %w", err)
+			}
+			fmt.Fprintf(c.OutOrStdout(), "attached %d file(s) to PR #%s\n", len(atts), prID)
+			for _, a := range atts {
+				fmt.Fprintf(c.OutOrStdout(), "  %s -> %s\n", a.Name, a.URL)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Optional message text to prepend before the embedded files")
+	cmd.Flags().BoolVar(&urlsOnly, "urls-only", false, "Print uploaded raw URLs and skip posting a PR comment")
 	return cmd
 }
 
