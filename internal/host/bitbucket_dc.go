@@ -586,10 +586,9 @@ func bbPRToHost(pr *bbPR) *PR {
 	for _, r := range pr.Reviewers {
 		reviewers = append(reviewers, r.User.Slug)
 	}
+	// Keep full 40-char SHA — Bitbucket DC build-status API requires it.
+	// Display sites truncate to 12 chars themselves.
 	sha := pr.FromRef.LatestCommit
-	if len(sha) > 12 {
-		sha = sha[:12]
-	}
 	return &PR{
 		ID:           strconv.Itoa(pr.ID),
 		URL:          url,
