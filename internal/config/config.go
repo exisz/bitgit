@@ -29,6 +29,15 @@ type PluginsConfig struct {
 	Disabled []string `toml:"disabled"`
 }
 
+// NotifyConfig holds the [notify] section. WebhookURL receives a JSON
+// {"content": "<msg>"} POST when a watched PR's CI state becomes
+// terminal (and INPROGRESS too, when NotifyInProgress is true).
+// Compatible with Discord webhooks and OpenClaw human-inbox webhooks.
+type NotifyConfig struct {
+	WebhookURL       string `toml:"webhook_url"`
+	NotifyInProgress bool   `toml:"notify_inprogress"`
+}
+
 // ReviewersConfig holds the [reviewers] section.
 type ReviewersConfig struct {
 	// Team is a fixed list of reviewer usernames always added to every PR.
@@ -45,6 +54,7 @@ type Config struct {
 	Hosts         []HostEntry     `toml:"hosts"`
 	Plugins       PluginsConfig   `toml:"plugins"`
 	Reviewers     ReviewersConfig `toml:"reviewers"`
+	Notify        NotifyConfig    `toml:"notify"`
 
 	// InsecureSkipVerify enables skipping TLS cert validation for all hosts.
 	// WARNING: exposes you to MITM attacks. Use only in controlled environments.
@@ -62,6 +72,9 @@ func (c *Config) SecretsDir() string { return filepath.Join(c.dir, "secrets") }
 
 // PluginsDir returns the plugins subdirectory.
 func (c *Config) PluginsDir() string { return filepath.Join(c.dir, "plugins") }
+
+// StateDir returns the state subdirectory (used for the PR watch registry).
+func (c *Config) StateDir() string { return filepath.Join(c.dir, "state") }
 
 // HostForURL finds the first [[hosts]] entry matching the given URL prefix.
 // Returns nil if not found.

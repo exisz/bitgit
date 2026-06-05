@@ -44,6 +44,8 @@ func (f *fakeHost) UpdatePR(_ context.Context, _, _, _ string, _ []string) error
 }
 func (f *fakeHost) CurrentUser(_ context.Context) (string, error) { return "", nil }
 
+func (f *fakeHost) DeclinePR(_ context.Context, _ string) error { return nil }
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------

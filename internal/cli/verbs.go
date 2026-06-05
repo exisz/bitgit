@@ -145,6 +145,8 @@ func newPRCmd() *cobra.Command {
 		newPRDeclineCmd(),
 		newPRBlockersCmd(),
 		newPRAttachCmd(),
+		newPRWatchCmd(),
+		newPRPollCmd(),
 	)
 	return cmd
 }
@@ -257,6 +259,11 @@ func newPRCreateCmd() *cobra.Command {
 			}
 
 			fmt.Fprintf(c.OutOrStdout(), "PR #%s created: %s\n", pr.ID, pr.URL)
+
+			// Auto-register for build-status polling.
+			if remoteURL, rerr := gitutil.RemoteURL(cfg.DefaultRemote); rerr == nil {
+				registerWatch(ctx, cfg, h, remoteURL, pr.ID, "create", pr)
+			}
 
 			// post-pr-create (informational; cannot veto)
 			hookCtx.Hook = "post-pr-create"
@@ -951,7 +958,14 @@ func newPushCmd() *cobra.Command {
 			if force {
 				gitArgs = append(gitArgs, "--force")
 			}
-			return runGit(gitArgs...)
+			if err := runGit(gitArgs...); err != nil {
+				return err
+			}
+
+			// Best-effort: if an open PR exists for this branch, register/refresh
+			// the watch so we pick up the new HeadSHA.
+			registerPushedBranchWatch(ctx, cfg, branch)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Force push")

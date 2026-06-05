@@ -61,6 +61,33 @@ deduplicated, and sorted alphabetically before being sent to the host API.
 If the `[reviewers]` section is absent, only explicit `--reviewer` flags apply
 — existing behaviour is preserved.
 
+```toml
+# Build-status notifications. When set, `bitgit pr poll` POSTs a JSON
+# `{"content": "<msg>"}` body to webhook_url whenever a watched PR
+# resolves to SUCCESSFUL or FAILED. Compatible with Discord incoming
+# webhooks and OpenClaw human-inbox webhooks.
+[notify]
+webhook_url = "https://discord.com/api/webhooks/…"
+# Optional: when true, also notify on the first INPROGRESS observation
+# per head SHA (off by default to avoid spam).
+notify_inprogress = false
+```
+
+### `[notify]` details
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `webhook_url` | `string` | `""` | Webhook URL receiving `{"content": "<msg>"}` POSTs. Empty disables notifications. |
+| `notify_inprogress` | `bool` | `false` | When `true`, also send a one-off ping on the first `INPROGRESS` observation per head SHA. |
+
+The watch registry lives at `~/.bitgit/state/pr-watch.json`. PRs are added
+automatically on `pr create` and on `push` (when an open PR matches the
+pushed branch), or manually via `bitgit pr watch add <id>`. `bitgit pr poll`
+drains the registry: terminal states (`SUCCESSFUL`, `FAILED`) trigger a
+notification and remove the entry; non-terminal states stay queued. An empty
+registry exits immediately with no host calls — safe to run from a 15-minute
+cron without busy-looping.
+
 > **Yellow's domain.** This file (`docs/config.md`) reserves the schema. The
 > chassis does not yet read `config.toml` — the loader and the precise key set
 > are added by the downstream implementation. Treat keys above as a stable
