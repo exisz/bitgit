@@ -49,6 +49,7 @@ func notifyClient(cfg *config.Config) *notify.Client {
 	return notify.New(notify.Config{
 		WebhookURL:       cfg.Notify.WebhookURL,
 		NotifyInProgress: cfg.Notify.NotifyInProgress,
+		Mode:             cfg.Notify.Mode,
 	})
 }
 
@@ -311,14 +312,14 @@ run on a tight schedule (e.g. every 15 minutes from cron) without busy-looping.`
 				switch r.State {
 				case "SUCCESSFUL", "FAILED":
 					_ = s.UpdatePollResult(r.Entry.Key, r.State, true)
-					if err := n.Send(ctx, formatNotification(r.Entry, r.State)); err != nil {
+					if err := n.Send(ctx, eventFor(r.Entry, r.State)); err != nil {
 						fmt.Fprintf(stderr(), "notify: %v\n", err)
 					}
 				case "INPROGRESS":
 					prevState := r.Entry.LastState
 					_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
 					if cfg.Notify.NotifyInProgress && prevState != "INPROGRESS" {
-						_ = n.Send(ctx, formatNotification(r.Entry, r.State))
+						_ = n.Send(ctx, eventFor(r.Entry, r.State))
 					}
 				default: // UNKNOWN or anything else
 					_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
@@ -404,19 +405,27 @@ func pollEntries(ctx context.Context, cfg *config.Config, entries []watchstore.E
 	return out, nil
 }
 
-func formatNotification(e watchstore.Entry, state string) string {
-	icon := "❓"
+func eventFor(e watchstore.Entry, state string) notify.Event {
+	status := "info"
 	switch state {
 	case "SUCCESSFUL":
-		icon = "✅"
+		status = "success"
 	case "FAILED":
-		icon = "❌"
+		status = "error"
 	case "INPROGRESS":
-		icon = "⏳"
+		status = "pending"
 	}
 	title := e.Title
 	if title == "" {
 		title = "(no title)"
 	}
-	return fmt.Sprintf("%s PR #%s **%s** — %s\n%s", icon, e.PRID, state, title, e.URL)
+	msg := fmt.Sprintf("PR #%s %s — %s", e.PRID, state, title)
+	project := e.ProjectKey + "/" + e.RepoSlug
+	return notify.Event{
+		Project: project,
+		Event:   "pr.ci",
+		Status:  status,
+		Message: msg,
+		URL:     e.URL,
+	}
 }

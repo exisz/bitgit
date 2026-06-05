@@ -62,22 +62,25 @@ If the `[reviewers]` section is absent, only explicit `--reviewer` flags apply
 — existing behaviour is preserved.
 
 ```toml
-# Build-status notifications. When set, `bitgit pr poll` POSTs a JSON
-# `{"content": "<msg>"}` body to webhook_url whenever a watched PR
-# resolves to SUCCESSFUL or FAILED. Compatible with Discord incoming
-# webhooks and OpenClaw human-inbox webhooks.
+# Build-status notifications. When set, `bitgit pr poll` POSTs JSON to
+# webhook_url whenever a watched PR resolves. Two modes, auto-detected
+# from the URL (or override with `mode`):
+#   "router"  — POST {project, event, status, message, url}; consumed by
+#               exisz/webhook-router's `generic` parser. Default for any
+#               URL not on discord.com.
+#   "discord" — POST {"content": "<msg>"}; raw Discord webhook URL.
 [notify]
-webhook_url = "https://discord.com/api/webhooks/…"
-# Optional: when true, also notify on the first INPROGRESS observation
-# per head SHA (off by default to avoid spam).
-notify_inprogress = false
+webhook_url = "https://linux.queue-musical.ts.net/webhook/hook/bitgit-pr-watch"
+# mode = "router"   # optional override; auto-detected by default
+# notify_inprogress = false  # also notify on first INPROGRESS per SHA
 ```
 
 ### `[notify]` details
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `webhook_url` | `string` | `""` | Webhook URL receiving `{"content": "<msg>"}` POSTs. Empty disables notifications. |
+| `webhook_url` | `string` | `""` | Webhook URL. Empty disables notifications. |
+| `mode` | `string` | `""` | Force `"router"` or `"discord"`; empty auto-detects from URL. |
 | `notify_inprogress` | `bool` | `false` | When `true`, also send a one-off ping on the first `INPROGRESS` observation per head SHA. |
 
 The watch registry lives at `~/.bitgit/state/pr-watch.json`. PRs are added

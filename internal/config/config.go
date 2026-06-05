@@ -36,6 +36,10 @@ type PluginsConfig struct {
 type NotifyConfig struct {
 	WebhookURL       string `toml:"webhook_url"`
 	NotifyInProgress bool   `toml:"notify_inprogress"`
+	// Mode forces the transport: "router" (POST structured event JSON to
+	// exisz/webhook-router) or "discord" (POST {"content":...} directly).
+	// Empty = auto-detect from URL.
+	Mode string `toml:"mode"`
 }
 
 // ReviewersConfig holds the [reviewers] section.
