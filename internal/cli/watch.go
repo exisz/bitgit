@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -17,6 +20,113 @@ import (
 	"github.com/exisz/bitgit/internal/notify"
 	"github.com/exisz/bitgit/internal/watchstore"
 )
+
+// pollSleep is overridable by tests to skip real waits.
+var pollSleep = func(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
+}
+
+// runPollOnce runs one poll cycle over the registry. Returns the number of
+// entries left in the registry after this cycle.
+func runPollOnce(ctx context.Context, cfg *config.Config, out *tabwriter.Writer) (remaining int, err error) {
+	s, err := openWatchStore(cfg)
+	if err != nil {
+		return 0, err
+	}
+	entries, err := s.List()
+	if err != nil {
+		return 0, err
+	}
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	results, err := pollEntries(ctx, cfg, entries)
+	if err != nil {
+		return len(entries), err
+	}
+	n := notifyClient(cfg)
+	for _, r := range results {
+		if r.Err != "" {
+			fmt.Fprintf(stderr(), "poll %s: %s\n", r.Entry.Key, r.Err)
+			continue
+		}
+		if r.NewHeadSHA != "" && r.NewHeadSHA != r.Entry.HeadSHA {
+			_ = s.UpdateHeadSHA(r.Entry.Key, r.NewHeadSHA)
+		}
+		switch r.State {
+		case "SUCCESSFUL", "FAILED":
+			_ = s.UpdatePollResult(r.Entry.Key, r.State, true)
+			if err := n.Send(ctx, eventFor(r.Entry, r.State)); err != nil {
+				fmt.Fprintf(stderr(), "notify: %v\n", err)
+			}
+		case "INPROGRESS":
+			prevState := r.Entry.LastState
+			_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
+			if cfg.Notify.NotifyInProgress && prevState != "INPROGRESS" {
+				_ = n.Send(ctx, eventFor(r.Entry, r.State))
+			}
+		default:
+			_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
+		}
+		if out != nil {
+			action := "kept"
+			if r.State == "SUCCESSFUL" || r.State == "FAILED" {
+				action = "resolved+notified"
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\n", r.Entry.Key, r.State, action)
+		}
+	}
+	after, _ := s.List()
+	return len(after), nil
+}
+
+// pollUntilDrained runs runPollOnce in a loop, sleeping cfg.Watch.PollInterval
+// between cycles, until the registry is empty or the context is cancelled.
+// Best-effort: errors are printed to stderr and the loop continues so a
+// transient host outage does not orphan watched PRs.
+func pollUntilDrained(ctx context.Context, cfg *config.Config) {
+	interval := cfg.Watch.PollInterval()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		remaining, err := runPollOnce(ctx, cfg, nil)
+		if err != nil {
+			fmt.Fprintf(stderr(), "watch loop: %v\n", err)
+		}
+		if remaining == 0 {
+			return
+		}
+		pollSleep(ctx, interval)
+	}
+}
+
+// pollUntilDrainedWithSignals wraps pollUntilDrained with SIGINT/SIGTERM
+// handling so Ctrl-C exits cleanly (entries stay in the registry; the next
+// `pr create` / `push` / `pr poll` resumes).
+func pollUntilDrainedWithSignals(ctx context.Context, cfg *config.Config) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	done := make(chan struct{})
+	go func() {
+		pollUntilDrained(ctx, cfg)
+		close(done)
+	}()
+	select {
+	case <-sigCh:
+		cancel()
+		<-done
+	case <-done:
+	}
+}
 
 // hostFromRemoteURL extracts the bare host (no scheme/port path) from a git
 // remote URL. Returns "" on parse failure.
@@ -142,12 +252,14 @@ func newPRWatchCmd() *cobra.Command {
 		newPRWatchAddCmd(),
 		newPRWatchListCmd(),
 		newPRWatchUnregisterCmd(),
+		newPRWatchStatusCmd(),
 	)
 	return cmd
 }
 
 func newPRWatchAddCmd() *cobra.Command {
-	return &cobra.Command{
+	var noWait bool
+	cmd := &cobra.Command{
 		Use:   "add <id>",
 		Short: "Manually register a PR for build-status polling",
 		Args:  cobra.ExactArgs(1),
@@ -170,6 +282,44 @@ func newPRWatchAddCmd() *cobra.Command {
 			}
 			registerWatch(ctx, cfg, h, remoteURL, pr.ID, "manual", pr)
 			fmt.Fprintf(c.OutOrStdout(), "watching PR #%s (%s)\n", pr.ID, pr.URL)
+			if !noWait {
+				pollUntilDrainedWithSignals(ctx, cfg)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "Register only; do not run inline poll loop")
+	return cmd
+}
+
+// newPRWatchStatusCmd prints the registry size + entries. Useful to verify
+// nothing is stuck after a previous SIGINT/SIGTERM.
+func newPRWatchStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show watch registry size and next poll interval",
+		RunE: func(c *cobra.Command, _ []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			s, err := openWatchStore(cfg)
+			if err != nil {
+				return err
+			}
+			entries, err := s.List()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "watched: %d\n", len(entries))
+			fmt.Fprintf(c.OutOrStdout(), "poll_interval: %s\n", cfg.Watch.PollInterval())
+			for _, e := range entries {
+				last := e.LastState
+				if last == "" {
+					last = "-"
+				}
+				fmt.Fprintf(c.OutOrStdout(), "  %s  %s  polls=%d  src=%s\n", e.Key, last, e.PollCount, e.Source)
+			}
 			return nil
 		},
 	}
@@ -246,20 +396,12 @@ func newPRWatchUnregisterCmd() *cobra.Command {
 	}
 }
 
-// newPRPollCmd drains the registry. Each call:
-//
-//   - Lists all entries.
-//   - For each, re-resolves the PR (so head_sha tracks fresh pushes), queries
-//     build status, and:
-//   - SUCCESSFUL/FAILED → notify + remove from registry.
-//   - INPROGRESS → notify only when state changed and notify_inprogress
-//     is enabled; record state.
-//   - UNKNOWN → record state, leave in registry.
-//
-// Designed to be safe to run on a 15-minute cron: when the registry is empty
-// it returns immediately with no host calls.
+// newPRPollCmd is the single-shot poll. Drains one cycle and exits. Kept for
+// scripted/cron use. The primary mode is the inline loop run by
+// `pr create`, `push`, and `pr watch add` (see pollUntilDrained).
 func newPRPollCmd() *cobra.Command {
 	var asJSON bool
+	var loop bool
 	cmd := &cobra.Command{
 		Use:   "poll",
 		Short: "Poll the watch registry once and notify on resolved PRs",
@@ -267,8 +409,10 @@ func newPRPollCmd() *cobra.Command {
 status from the host. Terminal states (SUCCESSFUL, FAILED) emit a notification
 and drop the entry from the registry. Non-terminal states stay queued.
 
-If the registry is empty this exits immediately with no host calls — safe to
-run on a tight schedule (e.g. every 15 minutes from cron) without busy-looping.`,
+If the registry is empty this exits immediately with no host calls.
+
+With --loop, runs continuously (sleeping watch.poll_interval_seconds between
+cycles, default 60s) until the registry drains or SIGINT/SIGTERM is received.`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -278,75 +422,73 @@ run on a tight schedule (e.g. every 15 minutes from cron) without busy-looping.`
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			s, err := openWatchStore(cfg)
-			if err != nil {
-				return err
-			}
-			entries, err := s.List()
-			if err != nil {
-				return err
-			}
-			if len(entries) == 0 {
-				if asJSON {
-					return json.NewEncoder(c.OutOrStdout()).Encode([]any{})
-				}
-				fmt.Fprintln(c.OutOrStdout(), "watch registry empty")
+			if loop {
+				pollUntilDrainedWithSignals(ctx, cfg)
 				return nil
 			}
-
-			results, err := pollEntries(ctx, cfg, entries)
-			if err != nil {
-				return err
-			}
-
-			// Apply registry mutations + send notifications.
-			n := notifyClient(cfg)
-			for _, r := range results {
-				if r.Err != "" {
-					fmt.Fprintf(stderr(), "poll %s: %s\n", r.Entry.Key, r.Err)
-					continue
-				}
-				if r.NewHeadSHA != "" && r.NewHeadSHA != r.Entry.HeadSHA {
-					_ = s.UpdateHeadSHA(r.Entry.Key, r.NewHeadSHA)
-				}
-				switch r.State {
-				case "SUCCESSFUL", "FAILED":
-					_ = s.UpdatePollResult(r.Entry.Key, r.State, true)
-					if err := n.Send(ctx, eventFor(r.Entry, r.State)); err != nil {
-						fmt.Fprintf(stderr(), "notify: %v\n", err)
-					}
-				case "INPROGRESS":
-					prevState := r.Entry.LastState
-					_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
-					if cfg.Notify.NotifyInProgress && prevState != "INPROGRESS" {
-						_ = n.Send(ctx, eventFor(r.Entry, r.State))
-					}
-				default: // UNKNOWN or anything else
-					_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
-				}
-			}
-
 			if asJSON {
+				// JSON path: keep prior behavior, return per-entry results.
+				s, err := openWatchStore(cfg)
+				if err != nil {
+					return err
+				}
+				entries, err := s.List()
+				if err != nil {
+					return err
+				}
+				if len(entries) == 0 {
+					return json.NewEncoder(c.OutOrStdout()).Encode([]any{})
+				}
+				results, err := pollEntries(ctx, cfg, entries)
+				if err != nil {
+					return err
+				}
+				// Apply mutations + notify (mirrors runPollOnce).
+				n := notifyClient(cfg)
+				for _, r := range results {
+					if r.Err != "" {
+						continue
+					}
+					if r.NewHeadSHA != "" && r.NewHeadSHA != r.Entry.HeadSHA {
+						_ = s.UpdateHeadSHA(r.Entry.Key, r.NewHeadSHA)
+					}
+					switch r.State {
+					case "SUCCESSFUL", "FAILED":
+						_ = s.UpdatePollResult(r.Entry.Key, r.State, true)
+						_ = n.Send(ctx, eventFor(r.Entry, r.State))
+					case "INPROGRESS":
+						prevState := r.Entry.LastState
+						_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
+						if cfg.Notify.NotifyInProgress && prevState != "INPROGRESS" {
+							_ = n.Send(ctx, eventFor(r.Entry, r.State))
+						}
+					default:
+						_ = s.UpdatePollResult(r.Entry.Key, r.State, false)
+					}
+				}
 				return json.NewEncoder(c.OutOrStdout()).Encode(results)
 			}
 			tw := tabwriter.NewWriter(c.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "PR\tSTATE\tACTION")
-			for _, r := range results {
-				action := "kept"
-				if r.State == "SUCCESSFUL" || r.State == "FAILED" {
-					action = "resolved+notified"
-				}
-				if r.Err != "" {
-					action = "error: " + r.Err
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Entry.Key, r.State, action)
+			remaining, err := runPollOnce(ctx, cfg, tw)
+			if err != nil {
+				return err
+			}
+			if remaining == 0 && !cmdHadOutput(tw) {
+				fmt.Fprintln(c.OutOrStdout(), "watch registry empty")
+				return nil
 			}
 			return tw.Flush()
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&loop, "loop", false, "Loop until registry drains (honors watch.poll_interval_seconds)")
 	return cmd
 }
+
+// cmdHadOutput is a tiny helper — we can't peek tabwriter buffer cheaply,
+// so we always flush. Keep this stub so the call site reads naturally.
+func cmdHadOutput(_ *tabwriter.Writer) bool { return true }
 
 // PollResult is one entry's outcome from a poll cycle.
 type PollResult struct {

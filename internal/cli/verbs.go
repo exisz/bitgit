@@ -160,6 +160,7 @@ func newPRCreateCmd() *cobra.Command {
 		target      string
 		draft       bool
 		reviewers   []string
+		noWait      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -264,7 +265,6 @@ func newPRCreateCmd() *cobra.Command {
 			if remoteURL, rerr := gitutil.RemoteURL(cfg.DefaultRemote); rerr == nil {
 				registerWatch(ctx, cfg, h, remoteURL, pr.ID, "create", pr)
 			}
-
 			// post-pr-create (informational; cannot veto)
 			hookCtx.Hook = "post-pr-create"
 			postDispatch(ctx, manifests, hookCtx, map[string]any{
@@ -275,6 +275,9 @@ func newPRCreateCmd() *cobra.Command {
 				"source_branch": pr.SourceBranch,
 				"target_branch": pr.TargetBranch,
 			})
+			if !noWait {
+				pollUntilDrainedWithSignals(ctx, cfg)
+			}
 			return nil
 		},
 	}
@@ -285,6 +288,7 @@ func newPRCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "", "Target branch (required)")
 	cmd.Flags().BoolVar(&draft, "draft", false, "Create as draft PR")
 	cmd.Flags().StringArrayVar(&reviewers, "reviewer", nil, "Reviewer username (repeatable)")
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "Skip inline poll loop after registering watch")
 	return cmd
 }
 
@@ -911,6 +915,7 @@ func newCommitCmd() *cobra.Command {
 
 func newPushCmd() *cobra.Command {
 	var force bool
+	var noWait bool
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Push to remote (fires pre-push hook)",
@@ -965,10 +970,14 @@ func newPushCmd() *cobra.Command {
 			// Best-effort: if an open PR exists for this branch, register/refresh
 			// the watch so we pick up the new HeadSHA.
 			registerPushedBranchWatch(ctx, cfg, branch)
+			if !noWait {
+				pollUntilDrainedWithSignals(ctx, cfg)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Force push")
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "Skip inline poll loop after push")
 	return cmd
 }
 

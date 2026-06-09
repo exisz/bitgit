@@ -133,6 +133,28 @@ docs/              landing page (index.html), plugin-protocol.md, config.md
 .goreleaser.yml    cross-platform binaries + Homebrew tap
 ```
 
+## PR watch lifecycle
+
+bitgit ships its own scheduler — no external cron / agent needed.
+
+- `bitgit pr create`, `bitgit push`, and `bitgit pr watch add` register the PR
+  in `~/.bitgit/state/pr-watch.json`, then **inline** poll the host until the
+  build resolves (SUCCESSFUL/FAILED) and notify via the configured webhook.
+- The loop sleeps `watch.poll_interval_seconds` (default 60s) between cycles
+  and exits the moment the registry drains.
+- SIGINT/SIGTERM exits cleanly; remaining entries stay in the registry and
+  the next `pr create` / `push` / `pr poll --loop` resumes them.
+- Pass `--no-wait` to register-only (returns immediately, no polling).
+- `bitgit pr watch status` shows registry size + interval.
+- `bitgit pr poll` is the single-shot variant (one cycle, exit). Still
+  available for cron-style usage; `--loop` mounts the same self-draining
+  loop without registering anything new.
+
+```
+[watch]
+poll_interval_seconds = 60
+```
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). The empire's Go OSS standard lives at

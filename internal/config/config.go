@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -42,6 +43,24 @@ type NotifyConfig struct {
 	Mode string `toml:"mode"`
 }
 
+// WatchConfig holds the [watch] section. PollInterval controls how often
+// the inline PR-watch loop polls the host for build status. The loop runs
+// in the same process that called `pr create` / `push` / `pr watch add`
+// and exits as soon as the registry drains — no external scheduler needed.
+type WatchConfig struct {
+	// PollIntervalSeconds is the interval between poll cycles in the inline
+	// watch loop. 0 or negative falls back to the default (60s).
+	PollIntervalSeconds int `toml:"poll_interval_seconds"`
+}
+
+// PollInterval returns the configured poll interval, or 60s default.
+func (w WatchConfig) PollInterval() time.Duration {
+	if w.PollIntervalSeconds <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(w.PollIntervalSeconds) * time.Second
+}
+
 // ReviewersConfig holds the [reviewers] section.
 type ReviewersConfig struct {
 	// Team is a fixed list of reviewer usernames always added to every PR.
@@ -59,6 +78,7 @@ type Config struct {
 	Plugins       PluginsConfig   `toml:"plugins"`
 	Reviewers     ReviewersConfig `toml:"reviewers"`
 	Notify        NotifyConfig    `toml:"notify"`
+	Watch         WatchConfig     `toml:"watch"`
 
 	// InsecureSkipVerify enables skipping TLS cert validation for all hosts.
 	// WARNING: exposes you to MITM attacks. Use only in controlled environments.
