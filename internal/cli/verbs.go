@@ -982,71 +982,9 @@ inline poll loop, set BITGIT_NO_WAIT=1.`,
 	return cmd
 }
 
-// newGitCmd is a fully transparent `git` proxy. Every arg passes through to
-// the system git binary unchanged. After a successful `push` invocation it
-// registers a watch for the current branch's open PR and runs the inline
-// poll loop — so users can `alias git='bitgit git'` and never miss a watch.
-func newGitCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:                "git [args...]",
-		Short:              "Transparent git proxy; auto-arms watch on push",
-		DisableFlagParsing: true,
-		Long: `Forwards every argument to the system git binary verbatim. If the
-subcommand is ` + "`push`" + ` and it succeeds, registers the current
-branch's open PR in the watch registry and runs the inline poll loop.
+// (newGitCmd removed — bitgit only proxies `push`; other git verbs go through
+// real git directly. This avoids surprising behavior when bitgit is on PATH.)
 
-Use it as a drop-in alias:
-
-    alias git='bitgit git'
-
-Set BITGIT_NO_WAIT=1 to skip the inline poll loop.`,
-		RunE: func(_ *cobra.Command, args []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			defer cancel()
-
-			if err := runGit(args...); err != nil {
-				return err
-			}
-
-			if firstNonFlag(args) == "push" {
-				branch, _ := gitutil.CurrentBranch()
-				registerPushedBranchWatch(ctx, cfg, branch)
-				if os.Getenv("BITGIT_NO_WAIT") == "" {
-					pollUntilDrainedWithSignals(ctx, cfg)
-				}
-			}
-			return nil
-		},
-	}
-}
-
-// firstNonFlag returns the first arg that does not start with '-'. git's
-// global options come before the subcommand (e.g. `git -C path push`),
-// so we have to skip them — plus their values when applicable.
-func firstNonFlag(args []string) string {
-	// Global options that take a value.
-	takesValue := map[string]bool{
-		"-C": true, "-c": true, "--exec-path": true,
-		"--git-dir": true, "--work-tree": true, "--namespace": true,
-		"--super-prefix": true, "--config-env": true,
-	}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			return a
-		}
-		// `--opt=val` form already self-contained; bare `--opt val` form
-		// needs us to skip the next arg.
-		if takesValue[a] {
-			i++
-		}
-	}
-	return ""
-}
 
 // ---------------------------------------------------------------------------
 // branch new
