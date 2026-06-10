@@ -914,12 +914,19 @@ func newCommitCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func newPushCmd() *cobra.Command {
-	var force bool
-	var noWait bool
 	cmd := &cobra.Command{
-		Use:   "push",
-		Short: "Push to remote (fires pre-push hook)",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Use:                "push [-- <git push args>...]",
+		Short:              "Transparent `git push` + auto-register PR watch",
+		DisableFlagParsing: true,
+		Long: `Runs the system git binary with the given arguments verbatim
+(e.g. ` + "`bitgit push origin HEAD --force-with-lease`" + `). After a
+successful push, if the current branch has an open PR, it is
+registered in the watch registry and an inline poll loop runs until
+the build resolves.
+
+Flags belonging to git are passed through unchanged. To skip the
+inline poll loop, set BITGIT_NO_WAIT=1.`,
+		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return err
@@ -949,7 +956,7 @@ func newPushCmd() *cobra.Command {
 				"head_sha":       sha,
 				"head_parents":   parents,
 				"commits_ahead":  ahead,
-				"force":          force,
+				"raw_args":       args,
 			}
 			hookCtx := hookContext("pre-push", cfg)
 			if err := dispatch(ctx, manifests, hookCtx, payload); err != nil {
@@ -959,26 +966,86 @@ func newPushCmd() *cobra.Command {
 				return err
 			}
 
-			gitArgs := []string{"push", remote, branch}
-			if force {
-				gitArgs = append(gitArgs, "--force")
-			}
+			gitArgs := append([]string{"push"}, args...)
 			if err := runGit(gitArgs...); err != nil {
 				return err
 			}
 
-			// Best-effort: if an open PR exists for this branch, register/refresh
-			// the watch so we pick up the new HeadSHA.
+			// Best-effort: if an open PR exists for this branch, register/refresh.
 			registerPushedBranchWatch(ctx, cfg, branch)
-			if !noWait {
+			if os.Getenv("BITGIT_NO_WAIT") == "" {
 				pollUntilDrainedWithSignals(ctx, cfg)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "Force push")
-	cmd.Flags().BoolVar(&noWait, "no-wait", false, "Skip inline poll loop after push")
 	return cmd
+}
+
+// newGitCmd is a fully transparent `git` proxy. Every arg passes through to
+// the system git binary unchanged. After a successful `push` invocation it
+// registers a watch for the current branch's open PR and runs the inline
+// poll loop — so users can `alias git='bitgit git'` and never miss a watch.
+func newGitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "git [args...]",
+		Short:              "Transparent git proxy; auto-arms watch on push",
+		DisableFlagParsing: true,
+		Long: `Forwards every argument to the system git binary verbatim. If the
+subcommand is ` + "`push`" + ` and it succeeds, registers the current
+branch's open PR in the watch registry and runs the inline poll loop.
+
+Use it as a drop-in alias:
+
+    alias git='bitgit git'
+
+Set BITGIT_NO_WAIT=1 to skip the inline poll loop.`,
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			if err := runGit(args...); err != nil {
+				return err
+			}
+
+			if firstNonFlag(args) == "push" {
+				branch, _ := gitutil.CurrentBranch()
+				registerPushedBranchWatch(ctx, cfg, branch)
+				if os.Getenv("BITGIT_NO_WAIT") == "" {
+					pollUntilDrainedWithSignals(ctx, cfg)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// firstNonFlag returns the first arg that does not start with '-'. git's
+// global options come before the subcommand (e.g. `git -C path push`),
+// so we have to skip them — plus their values when applicable.
+func firstNonFlag(args []string) string {
+	// Global options that take a value.
+	takesValue := map[string]bool{
+		"-C": true, "-c": true, "--exec-path": true,
+		"--git-dir": true, "--work-tree": true, "--namespace": true,
+		"--super-prefix": true, "--config-env": true,
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+		// `--opt=val` form already self-contained; bare `--opt val` form
+		// needs us to skip the next arg.
+		if takesValue[a] {
+			i++
+		}
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
