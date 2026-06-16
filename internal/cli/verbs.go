@@ -143,11 +143,76 @@ func newPRCmd() *cobra.Command {
 		newPRReadyCmd(),
 		newPRMergeCmd(),
 		newPRDeclineCmd(),
+		newPREditCmd(),
 		newPRBlockersCmd(),
 		newPRAttachCmd(),
 		newPRWatchCmd(),
 		newPRPollCmd(),
 	)
+	return cmd
+}
+
+func newPREditCmd() *cobra.Command {
+	var (
+		title    string
+		desc     string
+		descFile string
+	)
+	cmd := &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Edit a pull request's title and/or description",
+		Long:  "Update an existing PR's title or description. Pass --title/--description (or --description-file). Omitted fields are left unchanged.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			h, err := detectHost(cfg)
+			if err != nil {
+				return err
+			}
+
+			prID := args[0]
+			pr, err := h.GetPR(ctx, prID)
+			if err != nil {
+				return fmt.Errorf("get PR: %w", err)
+			}
+
+			newTitle := pr.Title
+			newDesc := pr.Description
+			titleSet := c.Flags().Changed("title")
+			descSet := c.Flags().Changed("description") || c.Flags().Changed("description-file")
+
+			if !titleSet && !descSet {
+				return fmt.Errorf("nothing to do: pass --title and/or --description (or --description-file)")
+			}
+			if titleSet {
+				newTitle = title
+			}
+			if c.Flags().Changed("description-file") {
+				b, err := os.ReadFile(descFile)
+				if err != nil {
+					return fmt.Errorf("read --description-file: %w", err)
+				}
+				newDesc = string(b)
+			} else if c.Flags().Changed("description") {
+				newDesc = desc
+			}
+
+			if err := h.UpdatePR(ctx, prID, newTitle, newDesc, nil); err != nil {
+				return fmt.Errorf("update PR: %w", err)
+			}
+			fmt.Fprintf(c.OutOrStdout(), "PR #%s updated\n", prID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "New PR title")
+	cmd.Flags().StringVar(&desc, "description", "", "New PR description")
+	cmd.Flags().StringVar(&descFile, "description-file", "", "Path to file with new PR description")
 	return cmd
 }
 
