@@ -154,14 +154,15 @@ func newPRCmd() *cobra.Command {
 
 func newPREditCmd() *cobra.Command {
 	var (
-		title    string
-		desc     string
-		descFile string
+		title     string
+		desc      string
+		descFile  string
+		reviewers []string
 	)
 	cmd := &cobra.Command{
 		Use:   "edit <id>",
-		Short: "Edit a pull request's title and/or description",
-		Long:  "Update an existing PR's title or description. Pass --title/--description (or --description-file). Omitted fields are left unchanged.",
+		Short: "Edit a pull request's title, description, and/or reviewers",
+		Long:  "Update an existing PR's title, description, or reviewers. Pass --title/--description (or --description-file) and/or --reviewers. Omitted fields are left unchanged. --reviewers is additive: listed slugs are merged with existing reviewers.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			cfg, err := config.Load()
@@ -186,9 +187,10 @@ func newPREditCmd() *cobra.Command {
 			newDesc := pr.Description
 			titleSet := c.Flags().Changed("title")
 			descSet := c.Flags().Changed("description") || c.Flags().Changed("description-file")
+			reviewersSet := c.Flags().Changed("reviewers")
 
-			if !titleSet && !descSet {
-				return fmt.Errorf("nothing to do: pass --title and/or --description (or --description-file)")
+			if !titleSet && !descSet && !reviewersSet {
+				return fmt.Errorf("nothing to do: pass --title and/or --description (or --description-file) and/or --reviewers")
 			}
 			if titleSet {
 				newTitle = title
@@ -203,7 +205,12 @@ func newPREditCmd() *cobra.Command {
 				newDesc = desc
 			}
 
-			if err := h.UpdatePR(ctx, prID, newTitle, newDesc, nil); err != nil {
+			var addReviewers []string
+			if reviewersSet {
+				addReviewers = splitAndTrim(reviewers)
+			}
+
+			if err := h.UpdatePR(ctx, prID, newTitle, newDesc, addReviewers); err != nil {
 				return fmt.Errorf("update PR: %w", err)
 			}
 			fmt.Fprintf(c.OutOrStdout(), "PR #%s updated\n", prID)
@@ -213,7 +220,23 @@ func newPREditCmd() *cobra.Command {
 	cmd.Flags().StringVar(&title, "title", "", "New PR title")
 	cmd.Flags().StringVar(&desc, "description", "", "New PR description")
 	cmd.Flags().StringVar(&descFile, "description-file", "", "Path to file with new PR description")
+	cmd.Flags().StringSliceVar(&reviewers, "reviewers", nil, "Comma-separated reviewer slugs to add (merged with existing reviewers)")
 	return cmd
+}
+
+// splitAndTrim splits comma-separated entries inside each input element and trims whitespace.
+// StringSliceVar already splits on comma, but we still trim and drop empties defensively.
+func splitAndTrim(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		for _, part := range strings.Split(raw, ",") {
+			s := strings.TrimSpace(part)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
 
 func newPRCreateCmd() *cobra.Command {
